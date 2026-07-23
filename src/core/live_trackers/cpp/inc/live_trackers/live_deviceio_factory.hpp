@@ -28,6 +28,7 @@ class MessageChannelTracker;
 class IMessageChannelTrackerImpl;
 class FullBodyTrackerPico;
 class IFullBodyTrackerPicoImpl;
+class XsensFullBodyTracker;
 class Generic3AxisPedalTracker;
 class IGeneric3AxisPedalTrackerImpl;
 class TensorPushTracker;
@@ -66,6 +67,7 @@ public:
     std::unique_ptr<IControllerTrackerImpl> create_controller_tracker_impl(const ControllerTracker* tracker);
     std::unique_ptr<IMessageChannelTrackerImpl> create_message_channel_tracker_impl(const MessageChannelTracker* tracker);
     std::unique_ptr<IFullBodyTrackerPicoImpl> create_full_body_tracker_pico_impl(const FullBodyTrackerPico* tracker);
+    std::unique_ptr<IFullBodyTrackerPicoImpl> create_xsens_full_body_tracker_impl(const XsensFullBodyTracker* tracker);
     std::unique_ptr<IGeneric3AxisPedalTrackerImpl> create_generic_3axis_pedal_tracker_impl(
         const Generic3AxisPedalTracker* tracker);
     std::unique_ptr<ITensorPushTrackerImpl> create_tensor_push_tracker_impl(const TensorPushTracker* tracker);

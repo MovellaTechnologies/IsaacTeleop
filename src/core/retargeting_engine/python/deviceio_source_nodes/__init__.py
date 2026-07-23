@@ -11,6 +11,7 @@ from .controllers_source import ControllersSource
 from .pedals_source import Generic3AxisPedalSource
 from .joint_state_source import JointStateSource
 from .full_body_source import FullBodySource
+from .xsens_full_body_source import XsensFullBodySource
 from .message_channel_source import MessageChannelSource
 from .message_channel_sink import MessageChannelSink
 from .message_channel_config import (
@@ -49,6 +50,7 @@ __all__ = [
     "Generic3AxisPedalSource",
     "JointStateSource",
     "FullBodySource",
+    "XsensFullBodySource",
     "MessageChannelSource",
     "MessageChannelSink",
     "MessageChannelConfig",

@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Xsens Technologies B.V. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: xsens_full_body
+description: "Xsens MVN full body pose pusher (FullBodyPosePico via distinct Xsens tensor collection)"
+command: "./xsens_full_body_plugin"
+version: "0.1.0"
+devices:
+  - path: "/full_body/xsens"
+    type: "xsens_full_body"
+    description: "Xsens MVN full body (24-joint FullBodyPosePico), collection_id xsens_full_body"

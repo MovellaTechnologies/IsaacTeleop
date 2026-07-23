@@ -181,6 +181,7 @@ if(BUILD_PLUGINS)
 
     add_subdirectory(src/plugins/controller_synthetic_hands)
     add_subdirectory(src/plugins/generic_3axis_pedal)
+    add_subdirectory(src/plugins/xsens_full_body)
     add_subdirectory(src/plugins/so101_leader)
     add_subdirectory(src/plugins/manus)
     add_subdirectory(src/plugins/haptikos)

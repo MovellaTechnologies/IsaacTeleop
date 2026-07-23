@@ -15,6 +15,7 @@ add_library(deviceio_trackers STATIC
     joint_state_tracker.cpp
     frame_metadata_tracker_oak.cpp
     full_body_tracker_pico.cpp
+    xsens_full_body_tracker.cpp
     inc/deviceio_trackers/head_tracker.hpp
     inc/deviceio_trackers/hand_tracker.hpp
     inc/deviceio_trackers/controller_tracker.hpp
@@ -25,6 +26,7 @@ add_library(deviceio_trackers STATIC
     inc/deviceio_trackers/haptic_command_reader_tracker.hpp
     inc/deviceio_trackers/joint_state_tracker.hpp
     inc/deviceio_trackers/frame_metadata_tracker_oak.hpp
+    inc/deviceio_trackers/xsens_full_body_tracker.hpp
 )
 
 target_include_directories(deviceio_trackers

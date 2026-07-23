@@ -10,6 +10,7 @@
 #include <deviceio_trackers/joint_state_tracker.hpp>
 #include <deviceio_trackers/message_channel_tracker.hpp>
 #include <deviceio_trackers/tensor_push_tracker.hpp>
+#include <deviceio_trackers/xsens_full_body_tracker.hpp>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 #include <schema/hand_generated.h>
@@ -190,6 +191,20 @@ PYBIND11_MODULE(_deviceio_trackers, m)
             [](const core::FullBodyTrackerPico& self, const core::ITrackerSession& session) -> core::FullBodyPosePicoTrackedT
             { return self.get_body_pose(session); },
             py::arg("session"), "Get full body pose tracked state (data is None if inactive)");
+
+    py::class_<core::XsensFullBodyTracker, core::ITracker, std::shared_ptr<core::XsensFullBodyTracker>>(
+        m, "XsensFullBodyTracker")
+        .def(py::init<const std::string&, size_t>(), py::arg("collection_id"),
+             py::arg("max_flatbuffer_size") = core::XsensFullBodyTracker::DEFAULT_MAX_FLATBUFFER_SIZE,
+             "Reader for FullBodyPosePico frames pushed by the Xsens add_device pusher on the given "
+             "collection_id (tensor path; distinct from the native FullBodyTrackerPico)")
+        .def(
+            "get_body_pose",
+            [](const core::XsensFullBodyTracker& self,
+               const core::ITrackerSession& session) -> core::FullBodyPosePicoTrackedT
+            { return self.get_body_pose(session); },
+            py::arg("session"),
+            "Get full body pose tracked state (data is None if no sample / collection unavailable)");
 
     m.attr("NUM_JOINTS") = static_cast<int>(core::HandJoint_NUM_JOINTS);
     m.attr("JOINT_PALM") = static_cast<int>(core::HandJoint_PALM);

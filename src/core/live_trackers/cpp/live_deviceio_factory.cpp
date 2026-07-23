@@ -13,6 +13,7 @@
 #include "live_joint_state_tracker_impl.hpp"
 #include "live_message_channel_tracker_impl.hpp"
 #include "live_tensor_push_tracker_impl.hpp"
+#include "live_xsens_full_body_tracker_impl.hpp"
 
 #include <deviceio_trackers/controller_tracker.hpp>
 #include <deviceio_trackers/frame_metadata_tracker_oak.hpp>
@@ -24,6 +25,7 @@
 #include <deviceio_trackers/joint_state_tracker.hpp>
 #include <deviceio_trackers/message_channel_tracker.hpp>
 #include <deviceio_trackers/tensor_push_tracker.hpp>
+#include <deviceio_trackers/xsens_full_body_tracker.hpp>
 #include <oxr_utils/oxr_time.hpp>
 
 #include <cassert>
@@ -79,6 +81,12 @@ std::unique_ptr<ITrackerImpl> try_create_full_body_pico_impl(LiveDeviceIOFactory
     return typed ? factory.create_full_body_tracker_pico_impl(typed) : nullptr;
 }
 
+std::unique_ptr<ITrackerImpl> try_create_xsens_full_body_impl(LiveDeviceIOFactory& factory, const ITracker& tracker)
+{
+    auto* typed = dynamic_cast<const XsensFullBodyTracker*>(&tracker);
+    return typed ? factory.create_xsens_full_body_tracker_impl(typed) : nullptr;
+}
+
 std::unique_ptr<ITrackerImpl> try_create_generic_pedal_impl(LiveDeviceIOFactory& factory, const ITracker& tracker)
 {
     auto* typed = dynamic_cast<const Generic3AxisPedalTracker*>(&tracker);
@@ -125,6 +133,7 @@ inline const TrackerDispatchEntry k_tracker_dispatch[] = {
     { &try_add_extensions<ControllerTracker, LiveControllerTrackerImpl>, &try_create_controller_impl },
     { &try_add_extensions<MessageChannelTracker, LiveMessageChannelTrackerImpl>, &try_create_message_channel_impl },
     { &try_add_extensions<FullBodyTrackerPico, LiveFullBodyTrackerPicoImpl>, &try_create_full_body_pico_impl },
+    { &try_add_extensions<XsensFullBodyTracker, LiveXsensFullBodyTrackerImpl>, &try_create_xsens_full_body_impl },
     { &try_add_extensions<Generic3AxisPedalTracker, LiveGeneric3AxisPedalTrackerImpl>, &try_create_generic_pedal_impl },
     { &try_add_extensions<TensorPushTracker, LiveTensorPushTrackerImpl>, &try_create_tensor_push_impl },
     { &try_add_extensions<HapticCommandReaderTracker, LiveHapticCommandReaderTrackerImpl>,
@@ -259,6 +268,17 @@ std::unique_ptr<IFullBodyTrackerPicoImpl> LiveDeviceIOFactory::create_full_body_
         channels = LiveFullBodyTrackerPicoImpl::create_mcap_channels(*writer_, get_name(tracker));
     }
     return std::make_unique<LiveFullBodyTrackerPicoImpl>(handles_, std::move(channels));
+}
+
+std::unique_ptr<IFullBodyTrackerPicoImpl> LiveDeviceIOFactory::create_xsens_full_body_tracker_impl(
+    const XsensFullBodyTracker* tracker)
+{
+    std::unique_ptr<XsensFullBodyMcapChannels> channels;
+    if (should_record(tracker))
+    {
+        channels = LiveXsensFullBodyTrackerImpl::create_mcap_channels(*writer_, get_name(tracker));
+    }
+    return std::make_unique<LiveXsensFullBodyTrackerImpl>(handles_, tracker, std::move(channels));
 }
 
 std::unique_ptr<IGeneric3AxisPedalTrackerImpl> LiveDeviceIOFactory::create_generic_3axis_pedal_tracker_impl(
