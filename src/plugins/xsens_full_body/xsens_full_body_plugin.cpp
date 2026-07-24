@@ -6,10 +6,10 @@
 #include <oxr/oxr_session.hpp>
 #include <oxr_utils/os_time.hpp>
 
-#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 
 namespace plugins
 {
@@ -19,14 +19,10 @@ namespace xsens_full_body
 namespace
 {
 
-constexpr double kPi = 3.14159265358979323846;
-constexpr double kLoopRateHz = 250.0; // matches main.cpp's push cadence (T1 S5)
-constexpr double kPelvisBobHz = 0.5;  // slow, obvious oscillation
-constexpr double kArmSwingHz = 0.5;
-constexpr int kArmSegment = 8; // an upper-arm segment in XmeSegmentIndex order (dummy liveness only)
-constexpr uint64_t kLogEveryFrames = 250; // ~1 s at 250 Hz
+constexpr uint64_t kLogEveryFrames = 250; // ~1 s at the MVN 60/240 Hz stream / soak cadence
 
-// FNV-1a 64-bit, for cheap per-frame payload fingerprinting (V3 verbatim / V4 liveness evidence).
+// FNV-1a 64-bit, for cheap per-frame payload fingerprinting (liveness evidence: distinct hashes
+// over time prove the pose tracks the recording rather than a frozen/cached frame).
 uint64_t fnv1a64(const uint8_t* data, size_t len)
 {
     uint64_t h = 1469598103934665603ULL;
@@ -40,9 +36,10 @@ uint64_t fnv1a64(const uint8_t* data, size_t len)
 
 } // namespace
 
-XsensFullBodyPlugin::XsensFullBodyPlugin(const std::string& collection_id)
-    : session_(std::make_shared<core::OpenXRSession>("XsensFullBodyPusher",
-                                                     core::SchemaPusher::get_required_extensions())),
+XsensFullBodyPlugin::XsensFullBodyPlugin(const std::string& collection_id, uint16_t port)
+    : port_(port),
+      session_(
+          std::make_shared<core::OpenXRSession>("XsensFullBodyPusher", core::SchemaPusher::get_required_extensions())),
       pusher_(session_->get_handles(),
               core::SchemaPusherConfig{ .collection_id = collection_id,
                                         .max_flatbuffer_size = MAX_FLATBUFFER_SIZE,
@@ -50,64 +47,59 @@ XsensFullBodyPlugin::XsensFullBodyPlugin(const std::string& collection_id)
                                         .localized_name = "Xsens MVN Full Body",
                                         .app_name = "XsensFullBodyPusher" })
 {
-    // Seed a neutral, per-segment-distinct, all-valid pose (identity orientation) — same well-formed
-    // base as tools/teleop_udp/teleop_sender.cpp; animate() perturbs it per frame.
-    for (int s = 0; s < NUM_MVN_SEGMENTS; ++s)
-    {
-        segs_[s].qw = 1.0;
-        segs_[s].qx = 0.0;
-        segs_[s].qy = 0.0;
-        segs_[s].qz = 0.0;
-        segs_[s].px = 0.01 * s;
-        segs_[s].py = 0.02 * s;
-        segs_[s].pz = 0.03 * s;
-        segs_[s].valid = true;
-    }
 }
 
-void XsensFullBodyPlugin::animate(uint64_t frame)
+void XsensFullBodyPlugin::onFrame(const teleop::TeleopFrame& frame)
 {
-    const double t = static_cast<double>(frame) / kLoopRateHz;
+    // OQ-3 timestamp mapping (decided in T4): stamp the local common clock with the pusher host's
+    // CLOCK_MONOTONIC as late as possible (arrival time at push), and forward the header's raw
+    // device time verbatim. The header's sampleTimeNs is a different host's session-relative ms
+    // clock and must NOT be forwarded onto the common clock (see DECISIONS.md). Sampled here, right
+    // before push_buffer, so it does not absorb queueing inside our own code.
+    const int64_t localCommonNs = core::os_monotonic_now_ns();
 
-    // Pelvis (segment 0) bobs vertically. MVN is Z-up, so pz is height.
-    segs_[0].pz = 1.0 + 0.2 * std::sin(2.0 * kPi * kPelvisBobHz * t);
+    // push_buffer copies the bytes on its side, so the frame's borrowed payload lifetime is fine.
+    pusher_.push_buffer(frame.payload, frame.payloadLen, localCommonNs, frame.rawDeviceTimeNs);
 
-    // Swing one arm: a unit quaternion about Z, angle sweeps +/- ~0.5 rad.
-    const double a = 0.5 * std::sin(2.0 * kPi * kArmSwingHz * t);
-    segs_[kArmSegment].qw = std::cos(a * 0.5);
-    segs_[kArmSegment].qx = 0.0;
-    segs_[kArmSegment].qy = 0.0;
-    segs_[kArmSegment].qz = std::sin(a * 0.5);
+    // First frame of every session (startup or seq reset): the raw material for the OQ-6 latency
+    // observation handed to #3866 (header time vs push time), and the session-boundary evidence.
+    if (frame.sessionStart)
+    {
+        std::cout << "[XsensFullBodyPusher] session seq=" << frame.seq << " header.sampleTimeNs=" << frame.sampleTimeNs
+                  << " header.rawDeviceTimeNs=" << frame.rawDeviceTimeNs << " pushed_at_monotonic_ns=" << localCommonNs
+                  << std::endl;
+    }
+
+    // Periodic liveness/verbatim evidence: constant size re-proves the 784 B max_flatbuffer_size
+    // sizing; distinct fnv1a64 across frames proves distinct live bytes (pose is tracking, not frozen).
+    if (delivered_ % kLogEveryFrames == 0)
+    {
+        std::cout << "[XsensFullBodyPusher] delivered=" << delivered_ << " seq=" << frame.seq
+                  << " size=" << frame.payloadLen << " fnv1a64=0x" << std::hex
+                  << fnv1a64(frame.payload, frame.payloadLen) << std::dec << std::endl;
+    }
+    ++delivered_;
 }
 
-void XsensFullBodyPlugin::update()
+void XsensFullBodyPlugin::run(const std::atomic<bool>& stop)
 {
-    animate(frame_);
-
-    const std::vector<uint8_t> payload = conv_.convertFrameOutput(segs_); // 784 B, verbatim MVN bytes
-
-    // Spike insurance: attribute any downstream rejection to the Isaac side, not our bytes.
-    if (!picofullbody::verifyFullBodyPosePicoPayload(payload.data(), payload.size()))
+    if (!receiver_.open(port_))
     {
-        throw std::runtime_error("XsensFullBodyPlugin: convertFrameOutput produced an invalid "
-                                 "FullBodyPosePico payload (frame " +
-                                 std::to_string(frame_) + ")");
+        throw std::runtime_error("XsensFullBodyPlugin: failed to bind UDP port " + std::to_string(port_));
     }
+    std::cout << "[XsensFullBodyPusher] listening on 0.0.0.0:" << port_
+              << " -> push_buffer (collection tensor full_body_pose)" << std::endl;
 
-    const int64_t now = core::os_monotonic_now_ns();
-    // T4 owns real clock mapping; the spike stamps both clocks with the local monotonic now.
-    pusher_.push_buffer(payload.data(), payload.size(), now, now);
+    // Blocking: the receiver's sink calls onFrame() -> push_buffer() synchronously per verified
+    // frame on this thread. Returns when stop is set or on a fatal socket error.
+    receiver_.run([this](const teleop::TeleopFrame& frame) { onFrame(frame); }, stop);
 
-    // V3/V4 evidence: per-frame size + fingerprint. Distinct hashes prove distinct buffers in
-    // (liveness); the constant size re-proves the 784 B max_flatbuffer_size sizing.
-    if (frame_ == 0 || frame_ % kLogEveryFrames == 0)
-    {
-        std::cout << "[XsensFullBodyPusher] frame=" << frame_ << " size=" << payload.size()
-                  << " fnv1a64=0x" << std::hex << fnv1a64(payload.data(), payload.size()) << std::dec
-                  << " verify=OK" << std::endl;
-    }
-
-    ++frame_;
+    const teleop::TeleopReceiverStats& s = receiver_.stats();
+    std::cout << "[XsensFullBodyPusher] stopped. delivered=" << s.delivered.load() << " resets=" << s.resets.load()
+              << " gaps=" << s.gapsTotal.load() << " droppedMalformed=" << s.droppedMalformed.load()
+              << " droppedUnverified=" << s.droppedUnverified.load() << " droppedStale=" << s.droppedStale.load()
+              << " droppedTruncated=" << s.droppedTruncated.load() << " warnedNonWholeMs=" << s.warnedNonWholeMs.load()
+              << " warnedTimeBackward=" << s.warnedTimeBackward.load() << std::endl;
 }
 
 } // namespace xsens_full_body

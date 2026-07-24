@@ -2,10 +2,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 Xsens Technologies B.V. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Standalone build of the Xsens full-body T1 spike pusher, mirroring
-# mvn_isaac_devtools/tools/teleop_udp/build.sh. Compiles the MVN dummy-frame builder
-# (picofullbody_converter.cpp) against the IsaacTeleop build-tree static libs + headers, so the
-# spike can be built and run without reconfiguring the whole IsaacTeleop super-build.
+# Standalone build of the Xsens full-body receiver-fed pusher (#3863), mirroring
+# mvn_isaac_devtools/tools/teleop_udp/build.sh. Compiles the embedded UDP receiver
+# (teleop_receiver.cpp) + the MVN framing/verify TUs (teleop_wire.cpp, picofullbody_converter.cpp)
+# against the IsaacTeleop build-tree static libs + headers, so it can be built and run without
+# reconfiguring the whole IsaacTeleop super-build.
 #
 # The in-tree CMake target (add_subdirectory(src/plugins/xsens_full_body)) is the eventual home;
 # this script is the fast T1 iteration path. Both produce the same executable.
@@ -49,8 +50,11 @@ for lib in "${IT_LIBS[@]}"; do
     fi
 done
 
-g++ -std=c++20 -O2 -o "$HERE/xsens_full_body_plugin" \
-    "$HERE/main.cpp" "$HERE/xsens_full_body_plugin.cpp" "$PFB/picofullbody_converter.cpp" \
+# -DXR_USE_TIMESPEC selects the Linux timespec path in oxr_utils/oxr_time.hpp (the in-tree CMake
+# build gets this transitively from the oxr targets; the standalone build must pass it explicitly).
+g++ -std=c++20 -O2 -DXR_USE_TIMESPEC -o "$HERE/xsens_full_body_plugin" \
+    "$HERE/main.cpp" "$HERE/xsens_full_body_plugin.cpp" "$HERE/teleop_receiver.cpp" \
+    "$PFB/picofullbody_converter.cpp" "$PFB/teleop_wire.cpp" \
     -I"$HERE" -I"$PFB" -I"$PFB/schema" -I"$THREEP/flatbuffers/include" -I"$XLIB/include" \
     "${IT_INC[@]}" \
     "${IT_LIBS[@]}" \

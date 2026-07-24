@@ -3,41 +3,42 @@
 
 #include "xsens_full_body_plugin.hpp"
 
-#include <chrono>
-#include <cstddef>
+#include <atomic>
+#include <csignal>
+#include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <string>
-#include <thread>
 
 using namespace plugins::xsens_full_body;
+
+namespace
+{
+std::atomic<bool> g_stop{ false };
+
+extern "C" void on_signal(int /*sig*/)
+{
+    g_stop.store(true, std::memory_order_relaxed);
+}
+} // namespace
 
 int main(int argc, char** argv)
 try
 {
-    if (argc == 0)
-    {
-        std::cerr << "Usage: " << argv[0] << " [collection_id]" << std::endl;
-        return 1;
-    }
-
     const std::string collection_id = (argc > 1) ? argv[1] : "xsens_full_body";
+    const uint16_t port = (argc > 2) ? static_cast<uint16_t>(std::atoi(argv[2])) : XsensFullBodyPlugin::DEFAULT_PORT;
 
-    std::cout << "Xsens Full Body Pusher (collection: " << collection_id << ", tensor: full_body_pose)"
-              << std::endl;
+    // Clean shutdown for the soak: SIGINT/SIGTERM set the stop flag so run() returns, the receiver
+    // closes its socket, and final stats print. Killing MVN Studio does NOT stop the pusher — the
+    // receiver treats the next seq=0 as a session boundary (the session-restart AC).
+    std::signal(SIGINT, on_signal);
+    std::signal(SIGTERM, on_signal);
 
-    XsensFullBodyPlugin plugin(collection_id);
+    std::cout << "Xsens Full Body Pusher (collection: " << collection_id
+              << ", tensor: full_body_pose, udp: 0.0.0.0:" << port << ")" << std::endl;
 
-    // Push dummy animated frames at ~250 Hz (T1 S5).
-    const auto frame_duration = std::chrono::nanoseconds(1000000000 / 250);
-    const auto program_start = std::chrono::steady_clock::now();
-    std::size_t frame_count = 0;
-
-    while (true)
-    {
-        plugin.update();
-        frame_count++;
-        std::this_thread::sleep_until(program_start + frame_duration * frame_count);
-    }
+    XsensFullBodyPlugin plugin(collection_id, port);
+    plugin.run(g_stop); // blocks until a signal or a fatal socket error
 
     return 0;
 }

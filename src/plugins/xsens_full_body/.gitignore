@@ -1,0 +1,2 @@
+# Standalone build.sh output binary (in-source; the in-tree CMake build goes to build/).
+/xsens_full_body_plugin

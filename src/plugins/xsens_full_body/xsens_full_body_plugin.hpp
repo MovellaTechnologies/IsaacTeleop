@@ -3,13 +3,11 @@
 
 #pragma once
 
+#include "teleop_receiver.h"
+
 #include <pusherio/schema_pusher.hpp>
 
-// From the MVN checkout (source-only compile input; picofullbody_core, F3 pattern). Produces the
-// bare FullBodyPosePico Output payload (784 B) that MVN Studio's live teleop stream puts on the wire.
-#include "picofullbody_converter.h"
-
-#include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -26,36 +24,50 @@ namespace xsens_full_body
 {
 
 /*!
- * @brief T1 spike pusher: builds dummy animated FullBodyPosePico frames with the production
- *        picofullbody::Converter and pushes them verbatim into a distinct Xsens tensor collection
- *        via OpenXR SchemaPusher.
+ * @brief Live pusher (#3863, T4): binds the embedded UDP teleop receiver to OpenXR SchemaPusher so
+ *        real MVN Studio "Isaac Teleop" frames flow all the way into a distinct Xsens tensor
+ *        collection. Replaces the T1 dummy frame builder with verified receiver bytes.
+ *
+ * Topology (T2/OQ-2): IN-TREE, ONE process. The receiver runs its blocking receive loop on this
+ * thread; its sink fires synchronously per verified frame and calls push_buffer directly (no
+ * localhost hop, no second framing). SchemaPusher is driven only from that one (receive) thread.
  *
  * Honest Xsens identity (collection_id "xsens_full_body", tensor_identifier "full_body_pose") —
  * this does not pretend to be a Pico device. Paired reader: core::XsensFullBodyTracker on the same
- * collection_id + tensor_identifier (OQ-1). No receiver / UDP / MVN Studio in the loop: frames are
- * generated in-process. The eventual receiver-fed pusher (#3863) swaps the dummy frame builder for
- * verified receiver bytes; identity/config are unchanged.
+ * collection_id + tensor_identifier (OQ-1). Conversion happens MVN-side (license-gated); the wire
+ * carries already-full-body bytes, so deserialize+verify here is parsing, not conversion.
+ *
+ * Timestamp mapping (OQ-3): the sink stamps sample_time_local_common_clock_ns with the pusher
+ * host's CLOCK_MONOTONIC at push (arrival time) and forwards the header's rawDeviceTimeNs verbatim
+ * as the raw device clock. Rationale + NVIDIA confirmation in DECISIONS.md / T4.
  */
 class XsensFullBodyPlugin
 {
 public:
     static constexpr size_t MAX_FLATBUFFER_SIZE = 4096; // 784 B payload (T1 F2) + headroom
-    static constexpr int NUM_MVN_SEGMENTS = picofullbody::Converter::NUM_MVN_SEGMENTS;
+    static constexpr uint16_t DEFAULT_PORT = 9764; // MVN Studio Isaac Teleop wire default
 
-    explicit XsensFullBodyPlugin(const std::string& collection_id);
+    XsensFullBodyPlugin(const std::string& collection_id, uint16_t port);
 
-    //! Build one animated frame and push it verbatim. Called ~250 Hz from main.cpp's loop.
-    void update();
+    //! Bind the receiver and run its blocking receive loop on THIS thread. For each verified frame
+    //! the sink pushes verbatim bytes via push_buffer. Returns when \c stop becomes true or on a
+    //! fatal socket error. \throws std::runtime_error if the UDP port cannot be bound.
+    void run(const std::atomic<bool>& stop);
+
+    const teleop::TeleopReceiverStats& stats() const
+    {
+        return receiver_.stats();
+    }
 
 private:
-    //! Fill segs_ with a finite, unit-quaternion, all-valid pose whose pelvis bobs and one arm
-    //! swings as a function of frame, so a downstream reader consuming stale/cached frames is
-    //! self-evident (V4). Preserves the converter precondition (finite, near-unit-norm quat).
-    void animate(uint64_t frame);
+    //! Receiver sink: restamp local-common clock at push, forward raw device time, push verbatim.
+    //! Runs on the receive thread; the payload is valid only for this call (push_buffer copies).
+    void onFrame(const teleop::TeleopFrame& frame);
 
-    picofullbody::Converter conv_; //!< NOT thread-safe; one instance, driven from this thread only.
-    std::array<picofullbody::SegmentPose, NUM_MVN_SEGMENTS> segs_{};
-    uint64_t frame_ = 0;
+    uint16_t port_;
+    uint64_t delivered_ = 0; //!< receive-thread-only frame counter for periodic evidence logging
+
+    teleop::TeleopUdpReceiver receiver_;
 
     std::shared_ptr<core::OpenXRSession> session_;
     core::SchemaPusher pusher_;
