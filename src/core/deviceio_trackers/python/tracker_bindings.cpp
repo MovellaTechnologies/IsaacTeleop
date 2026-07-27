@@ -200,11 +200,9 @@ PYBIND11_MODULE(_deviceio_trackers, m)
              "collection_id (tensor path; distinct from the native FullBodyTrackerPico)")
         .def(
             "get_body_pose",
-            [](const core::XsensFullBodyTracker& self,
-               const core::ITrackerSession& session) -> core::FullBodyPosePicoTrackedT
+            [](const core::XsensFullBodyTracker& self, const core::ITrackerSession& session) -> core::FullBodyPosePicoTrackedT
             { return self.get_body_pose(session); },
-            py::arg("session"),
-            "Get full body pose tracked state (data is None if no sample / collection unavailable)");
+            py::arg("session"), "Get full body pose tracked state (data is None if no sample / collection unavailable)");
 
     m.attr("NUM_JOINTS") = static_cast<int>(core::HandJoint_NUM_JOINTS);
     m.attr("JOINT_PALM") = static_cast<int>(core::HandJoint_PALM);
