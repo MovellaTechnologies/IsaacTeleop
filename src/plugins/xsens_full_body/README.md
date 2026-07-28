@@ -87,6 +87,46 @@ under `install/`, so refresh them with
 (Network Streamer ▸ **Isaac Teleop** preset ▸ 127.0.0.1:9764 ▸ Play) or headless with
 `mvn_isaac_devtools/tools/teleop_udp/teleop_sender 6000 9764 1`.
 
+#### Closing the session
+
+`Ctrl-b d` only **detaches** — every pane and the runtime keep running. To actually shut down, stop
+the runtime *first*, then destroy the session:
+
+1. `Ctrl-C` in the runtime pane (`Ctrl-C` kills the pane's command, not the pane).
+2. `python -m isaacteleop.rig rigs/xsens_full_body.yaml --kill`.
+
+That order matters. `--kill` is only `tmux kill-session`, and tmux destroys panes with `SIGHUP`,
+whereas the runtime handles `SIGINT`/`SIGTERM` and registers its cleanup through `atexit` — none of
+which runs on a `SIGHUP` death. Its cleanup is what removes `runtime_started` and `ipc_cloudxr`.
+
+This is not hypothetical — measured on Linux, a bare `--kill` with no preceding `Ctrl-C` leaves both
+`runtime_started` and `ipc_cloudxr` in place **and** the runtime process alive, reparented to
+`systemd --user` as its own session leader (`pid == pgid == sid`). It is started with
+`start_new_session`, so the `SIGHUP` tmux sends to the pane's process group never reaches it. Verify:
+
+```bash
+tmux ls                                       # no xsens_full_body session
+ls ~/.cloudxr/run/                            # no runtime_started, no ipc_cloudxr
+kill -0 $(cat ~/.cloudxr/run/cloudxr.pid)     # should fail
+ps -eo pid,cmd | grep -Ei "cloudxr|monado"    # no survivors
+```
+
+A leftover `cloudxr.pid` holding a dead pid is normal and harmless — the runtime does not remove its
+own pid file, and the next *managed* launch calls `_cleanup_stale_runtime`, which clears
+`ipc_cloudxr`, `runtime_started`, `monado.pid` and `cloudxr.pid` before starting. The combination to
+avoid is a stale `runtime_started` plus `--no-runtime`: panes would source the env and auto-run
+against a dead runtime instead of failing honestly on the 120 s timeout. Manual reset:
+
+```bash
+kill $(cat ~/.cloudxr/run/cloudxr.pid) 2>/dev/null
+rm -f ~/.cloudxr/run/{runtime_started,ipc_cloudxr,cloudxr.pid,monado.pid}
+```
+
+If the `Ctrl-b` prefix appears to do nothing, the terminal is probably eating it — VS Code binds
+`Ctrl-B` to *Toggle Primary Sidebar*, so it never reaches tmux. Use a standalone terminal, or drive
+the session from a second shell (`tmux select-pane -t xsens_full_body.1`,
+`tmux send-keys -t xsens_full_body.0 C-c`).
+
 Prove it with a reader on the same collection: an `XsensFullBodySource(name="xsens",
 collection_id="xsens_full_body")` in a `TeleopSession` (V1), or MCAP recording on the `full_body`
 channel (V2). Per-frame size + FNV-1a fingerprint is logged (~1 Hz) as V3/V4 evidence.
