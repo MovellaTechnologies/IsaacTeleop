@@ -47,6 +47,9 @@ add_subdirectory(teleop_session_manager)
 # CloudXR runtime helper (pure Python, docker-less)
 add_subdirectory(cloudxr)
 
+# Rig launcher (pure Python, tmux-based)
+add_subdirectory(rig)
+
 # Python wheel packaging (combines both modules)
 if(BUILD_PYTHON_BINDINGS)
     add_subdirectory(python)
@@ -69,6 +72,9 @@ if(BUILD_TESTING)
     # CloudXR tests (Python — requires the built wheel from python/)
     if(BUILD_PYTHON_BINDINGS)
         add_subdirectory(cloudxr_tests)
+
+        # Rig launcher tests (Python)
+        add_subdirectory(rig_tests)
     endif()
 
     # MCAP tests (C++)

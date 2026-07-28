@@ -51,7 +51,11 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1", help="Viser bind address")
     parser.add_argument("--port", type=int, default=8080, help="Viser HTTP port")
-    parser.add_argument("--collection", default="xsens_full_body", help="Tensor collection id (match the pusher)")
+    parser.add_argument(
+        "--collection",
+        default="xsens_full_body",
+        help="Tensor collection id (match the pusher)",
+    )
     args = parser.parse_args(argv[1:])
 
     server = viser.ViserServer(host=args.host, port=args.port)
@@ -68,7 +72,9 @@ def main(argv: list[str]) -> int:
     # `source ~/.cloudxr/run/cloudxr.env` applied. The pose arrives via the pusher, not a headset.
     with TeleopSession(config) as session:
         viz = FullBodyViz(server)
-        print(f"[xsens-live] viser at http://localhost:{args.port}  (collection={args.collection})")
+        print(
+            f"[xsens-live] viser at http://localhost:{args.port}  (collection={args.collection})"
+        )
         print("[xsens-live] waiting for frames on the collection… (Ctrl+C to stop)")
         try:
             while True:
@@ -78,12 +84,18 @@ def main(argv: list[str]) -> int:
                     viz.update(None, None)
                     n_valid = 0
                 else:
-                    positions = np.asarray(full_body[FullBodyInputIndex.JOINT_POSITIONS], dtype=np.float32)
-                    valid = np.asarray(full_body[FullBodyInputIndex.JOINT_VALID], dtype=np.uint8)
+                    positions = np.asarray(
+                        full_body[FullBodyInputIndex.JOINT_POSITIONS], dtype=np.float32
+                    )
+                    valid = np.asarray(
+                        full_body[FullBodyInputIndex.JOINT_VALID], dtype=np.uint8
+                    )
                     viz.update(positions, valid)
                     n_valid = int(np.count_nonzero(valid))
                 if session.frame_count % 60 == 0:
-                    print(f"[xsens-live] frame={session.frame_count}  joints={n_valid:02d}/{len(BODY_JOINT_NAMES)}")
+                    print(
+                        f"[xsens-live] frame={session.frame_count}  joints={n_valid:02d}/{len(BODY_JOINT_NAMES)}"
+                    )
                 time.sleep(1 / 60)
         except KeyboardInterrupt:
             pass

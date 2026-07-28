@@ -57,8 +57,35 @@ Requires the CloudXR OpenXR runtime with `XR_NVX1_push_tensor` + `XR_NVX1_tensor
 the pedal sample launches.
 
 ```bash
-./xsens_full_body_plugin [collection_id]     # default: xsens_full_body
+./xsens_full_body_plugin [collection_id] [udp_port]   # defaults: xsens_full_body, 9764
 ```
+
+### Or launch the whole session with the rig launcher
+
+`rigs/xsens_full_body.yaml` starts the pusher, the C++ printer and the viser skeleton as three
+tmux panes, each waiting for the CloudXR runtime and sourcing its env automatically:
+
+```bash
+cd <IsaacTeleop>
+python -m isaacteleop.rig rigs/xsens_full_body.yaml                # let the rig manage the runtime
+python -m isaacteleop.rig rigs/xsens_full_body.yaml --no-runtime   # only when a runtime is ALREADY up
+python -m isaacteleop.rig rigs/xsens_full_body.yaml --kill         # tear the session down
+```
+
+`--no-runtime` skips the runtime *pane*, not the runtime *wait*: every worker pane still blocks up
+to 120 s on `~/.cloudxr/run/runtime_started` and auto-runs only once `cloudxr.env` is sourced. With
+no runtime up, all panes therefore time out with `[cloudxr] runtime not ready after 120s` and drop
+to a shell with the command pre-typed. Check with `kill -0 $(cat ~/.cloudxr/run/cloudxr.pid)` first,
+and prefer the managed form above when in doubt. Note a re-run *reattaches* to an existing session
+(reattach is decided before preflight), so apply YAML edits with `--kill` then relaunch.
+
+Run it from the interpreter you want in the panes — `{python}` in the rig expands to
+`sys.executable`, and tmux panes do not inherit an activated venv. The rig references the binaries
+under `install/`, so refresh them with
+`cmake --install build/src/plugins/xsens_full_body` and
+`cmake --install build/examples/xsens_full_body` after a rebuild. Feed it from MVN Studio
+(Network Streamer ▸ **Isaac Teleop** preset ▸ 127.0.0.1:9764 ▸ Play) or headless with
+`mvn_isaac_devtools/tools/teleop_udp/teleop_sender 6000 9764 1`.
 
 Prove it with a reader on the same collection: an `XsensFullBodySource(name="xsens",
 collection_id="xsens_full_body")` in a `TeleopSession` (V1), or MCAP recording on the `full_body`
