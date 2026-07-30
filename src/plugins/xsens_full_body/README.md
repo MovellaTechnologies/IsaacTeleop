@@ -1,13 +1,16 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 Xsens Technologies B.V. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Xsens Full Body Pusher (T1 spike)
+# Xsens Full Body Pusher
 
-An `add_device` pusher that streams **full-body pose** (`FullBodyPosePico`, 24 joints) into a
-**distinct Xsens tensor collection**, consumed by the fork-side reader
-`core::XsensFullBodyTracker` + `XsensFullBodySource`. This is the T1 spike (ADO **#3862**): it
-generates **dummy animated frames in-process** (no receiver, no UDP, no MVN Studio) to prove the
-push → tensor collection → reader decode mechanism end to end.
+An `add_device` pusher that receives the live Xsens full-body stream from MVN Studio over UDP and
+publishes it (`FullBodyPosePico`, 24 joints) into a **distinct Xsens tensor collection**, consumed by
+`core::XsensFullBodyTracker` + `XsensFullBodySource`.
+
+Receiver and pusher live in **one process**: the UDP receive loop hands each verified frame straight
+to `SchemaPusher::push_buffer` on the same thread — no localhost hop, no second framing, no
+re-serialization. MVN Studio has already converted the pose, so nothing here interprets Xsens data;
+the payload bytes are forwarded verbatim.
 
 ## Why a distinct collection (not the existing `full_body`)
 
@@ -16,8 +19,7 @@ is **no tensor collection** behind `full_body` for a pusher to target. Full-body
 retargeting engine over the pusher route **only** via a tensor-collection reader
 (`SchemaTracker<FullBodyPosePicoRecord, FullBodyPosePico>`), which requires a distinct
 `collection_id` / `tensor_identifier`. This is the established add_device pattern (pedal / so101 /
-oak). Honest Xsens identity: we do not pretend to be a Pico device. See
-`mvn_isaac_devtools/docs/plans/feature2_pusher_receiver_tasks/OQ1_push_identity_findings.md`.
+oak). Honest Xsens identity: we do not pretend to be a Pico device.
 
 ## Identity / config (pusher `SchemaPusherConfig` ↔ reader `SchemaTrackerConfig` — must agree)
 
@@ -30,25 +32,49 @@ oak). Honest Xsens identity: we do not pretend to be a Pico device. See
 | `app_name` | `"XsensFullBodyPusher"` |
 | extensions | `SchemaPusher::get_required_extensions()` → `XR_NVX1_push_tensor` + `XR_NVX1_tensor_data` + time-conversion (**no** body-tracking ext) |
 
-## Dummy frame builder
+A `collection_id` mismatch between pusher and reader is **silent no-data**, not an error — pass the
+same value to both.
 
-The payload is built by the **production** `picofullbody::Converter::convertFrameOutput()` (from the
-MVN checkout, `mvn_studio/src/picofullbody_core/`) — the exact bytes MVN Studio's live teleop stream
-puts on the wire (F1/F3). The pose is animated (pelvis bob + one arm swing, unit quaternions) so a
-reader consuming stale/cached frames is self-evident. Each frame is gated with
-`verifyFullBodyPosePicoPayload()` so any downstream rejection is attributable to the Isaac side, not
-our bytes. Bytes are handed to `push_buffer` verbatim (no re-serialization).
+## Frame source: the live teleop wire
+
+`teleop_receiver.{h,cpp}` binds UDP (default 9764) and, per datagram:
+
+1. deserializes the fixed 36-byte header (magic, version, seq, sample time, raw device time,
+   payload length);
+2. calls `verifyFullBodyPosePicoPayload()` **before** any FlatBuffer access — `GetRoot` does no
+   bounds checking, so this gate is what makes a malformed datagram safe;
+3. hands the payload pointer + length and the header times to the sink, which pushes them verbatim.
+
+Stream semantics: a `seq` reset to 0 is a **session boundary** (MVN Studio restarted — the pusher
+keeps running and picks up the new session), a `seq` gap is UDP loss and is counted, and a malformed
+or unverifiable datagram is dropped. Nothing in that set is fatal.
+
+The framing and verify gate are compiled from the MVN sources (`picofullbody_core`), so both ends of
+the wire are built from one definition.
+
+## Timestamps
+
+```
+sample_time_local_common_clock_ns = CLOCK_MONOTONIC on this host, sampled at the push call
+sample_time_raw_device_clock_ns   = the header's raw device time, forwarded verbatim
+```
+
+The header's sample time is a *different* host's session-relative millisecond clock, so it cannot be
+placed on the local common clock — restamping at push is what keeps the pushed clock monotonic even
+when the sending side rewinds (recording playback loops), and it matches how the pedal sample stamps
+at read.
 
 ## Build
 
-**In-tree (CMake, eventual home).** Built automatically as part of the IsaacTeleop super-build when
-the sibling MVN checkout is present (`<trunk>/{IsaacTeleop,mvn,3p,linux-x64}`). Override paths with
+**In-tree (CMake).** Built automatically as part of the IsaacTeleop super-build when the sibling MVN
+checkout is present (`<trunk>/{IsaacTeleop,mvn,3p,linux-x64}`). Override paths with
 `-DXSENS_MVN_PICOFULLBODY_DIR=...`, `-DXSENS_3P_FLATBUFFERS_INCLUDE=...`, `-DXSENS_XLIB_INCLUDE=...`.
-If the MVN converter is not found the plugin is skipped (never fails the main build).
+If the MVN sources are not found the plugin is **skipped** with a status message and never fails the
+main build — which also means CI, where no MVN checkout exists, does not compile it.
 
-**Standalone (fast T1 iteration).** `./build.sh` compiles against the IsaacTeleop build-tree static
-libs (`cmake --build build` must have been run once) + the MVN converter. Produces the same
-executable without reconfiguring the super-build.
+**Standalone (fast iteration).** `./build.sh` compiles against the IsaacTeleop build-tree static libs
+(`cmake --build build` must have been run once) + the MVN sources. Produces the same executable
+without reconfiguring the super-build.
 
 ## Run
 
@@ -59,6 +85,26 @@ the pedal sample launches.
 ```bash
 ./xsens_full_body_plugin [collection_id] [udp_port]   # defaults: xsens_full_body, 9764
 ```
+
+Start the pusher **before** any reader — it creates the collection. Expect:
+
+```
+Xsens Full Body Pusher (collection: xsens_full_body, tensor: full_body_pose, udp: 0.0.0.0:9764)
+[XsensFullBodyPusher] listening on 0.0.0.0:9764 -> push_buffer (collection tensor full_body_pose)
+```
+
+Then feed it, either from MVN Studio (Network Streamer ▸ **Isaac Teleop** preset ▸ `127.0.0.1:9764`
+▸ Play) or headless with `mvn_isaac_devtools/tools/teleop_udp/teleop_sender 6000 9764 1`.
+
+Per session (startup or `seq` reset) it logs the header times next to the push-time monotonic stamp;
+roughly once a second it logs `delivered=… seq=… size=… fnv1a64=…` — a constant `size` re-confirms
+the `max_flatbuffer_size` sizing and changing fingerprints prove live bytes rather than a frozen or
+cached pose. `Ctrl-C` (SIGINT/SIGTERM) stops it cleanly and prints the final counters: `delivered`,
+`resets`, `gaps`, the four `dropped*` reasons, and the two `warned*` reasons.
+
+Confirm the data lands by reading the same collection: `examples/xsens_full_body/xsens_full_body_printer`
+(C++), an `XsensFullBodySource(name="xsens", collection_id="xsens_full_body")` in a `TeleopSession`,
+or MCAP recording on the `full_body` channel.
 
 ### Or launch the whole session with the rig launcher
 
@@ -83,9 +129,7 @@ Run it from the interpreter you want in the panes — `{python}` in the rig expa
 `sys.executable`, and tmux panes do not inherit an activated venv. The rig references the binaries
 under `install/`, so refresh them with
 `cmake --install build/src/plugins/xsens_full_body` and
-`cmake --install build/examples/xsens_full_body` after a rebuild. Feed it from MVN Studio
-(Network Streamer ▸ **Isaac Teleop** preset ▸ 127.0.0.1:9764 ▸ Play) or headless with
-`mvn_isaac_devtools/tools/teleop_udp/teleop_sender 6000 9764 1`.
+`cmake --install build/examples/xsens_full_body` after a rebuild.
 
 #### Closing the session
 
@@ -127,11 +171,15 @@ If the `Ctrl-b` prefix appears to do nothing, the terminal is probably eating it
 the session from a second shell (`tmux select-pane -t xsens_full_body.1`,
 `tmux send-keys -t xsens_full_body.0 C-c`).
 
-Prove it with a reader on the same collection: an `XsensFullBodySource(name="xsens",
-collection_id="xsens_full_body")` in a `TeleopSession` (V1), or MCAP recording on the `full_body`
-channel (V2). Per-frame size + FNV-1a fingerprint is logged (~1 Hz) as V3/V4 evidence.
+## Behaviour and limitations
 
-## Not in scope (this is #3863)
-
-The real UDP receiver and its push sink (swapping `convertFrameOutput()` for verified receiver
-bytes). Identity/config above are unchanged when that swap happens.
+- **Single-threaded and blocking.** `run()` owns the thread: receive → verify → push, synchronously
+  per frame.
+- **One collection and one port per instance.** To serve several readers, point them all at the same
+  collection rather than starting a second pusher.
+- **The OpenXR session is established once, at construction.** If the CloudXR runtime restarts, the
+  pusher does not re-establish its session — restart the plugin.
+- **A fatal socket error ends the run.** Unexpected `recvfrom` errors stop the loop and print the
+  final counters rather than retrying; the receive timeout itself (idle stream) is not an error.
+- **Frame loss is visible, not repaired.** UDP has no retransmission by design; `gaps` and the
+  `dropped*` counters are the record of what did not arrive intact.
