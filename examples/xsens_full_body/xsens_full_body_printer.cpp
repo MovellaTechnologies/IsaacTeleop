@@ -31,6 +31,7 @@
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
+#include <ctime>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -63,6 +64,19 @@ long latency_tap_interval()
         return 0;
     const long n = std::atol(env);
     return (n > 0) ? n : 0;
+}
+
+// Wall-clock (CLOCK_REALTIME) nanoseconds. Deliberately NOT the monotonic clock: the raw device
+// stamp forwarded from MVN is XsTimeStamp ms since the Unix epoch, i.e. already in this domain
+// (MVN's estimatedTimeOfSampling -> pose absoluteTime -> header rawDeviceTimeNs -> push_buffer ->
+// sample_time_raw_device_clock). Reading REALTIME here makes capture->consumer a plain subtraction
+// with no cross-clock mapping to get wrong. A CLOCK_REALTIME step (NTP) during a run would show as
+// an outlier rather than a silent bias, which is why the join script sanity-checks the magnitude.
+int64_t realtime_now_ns()
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return static_cast<int64_t>(ts.tv_sec) * 1000000000LL + static_cast<int64_t>(ts.tv_nsec);
 }
 } // namespace
 
@@ -114,11 +128,16 @@ try
         if (tapN > 0 && timing != nullptr && timing->last_sample_count() > 0)
         {
             const int64_t readNs = core::os_monotonic_now_ns();
+            const int64_t realNs = realtime_now_ns();
             if (tapSamples % static_cast<uint64_t>(tapN) == 0)
             {
                 const core::DeviceDataTimestamp& ts = timing->last_sample_timestamp();
+                // raw_ns/real_ns are the CLOCK_REALTIME pair that yields capture->consumer:
+                // raw_ns is MVN's estimated time of sampling (ms resolution, live streams only),
+                // real_ns is now. Everything else on this line is the monotonic domain.
                 std::cout << "ISAACLAT read push_ns=" << ts.sample_time_local_common_clock()
                           << " avail_ns=" << ts.available_time_local_common_clock() << " read_ns=" << readNs
+                          << " raw_ns=" << ts.sample_time_raw_device_clock() << " real_ns=" << realNs
                           << " n_samples=" << timing->last_sample_count() << std::endl;
             }
             ++tapSamples;
