@@ -83,6 +83,9 @@ private:
     uint64_t sessionRecoveries_ = 0; //!< successful re-establishes after a push failure
     uint64_t pushFailures_ = 0; //!< push_buffer throws seen (each opens a recovery episode)
 
+    //! ISAACLAT tap interval in frames, from $ISAACLAT_N; 0 disables the tap (#3866).
+    uint64_t latencyTapN_ = 0;
+
     //! Borrowed for the duration of run(), so recoverSession()'s backoff stays interruptible.
     const std::atomic<bool>* stop_ = nullptr;
 

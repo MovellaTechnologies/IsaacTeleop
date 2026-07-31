@@ -173,6 +173,11 @@ void TeleopUdpReceiver::run(const TeleopFrameSink& sink, const std::atomic<bool>
             n = ::recvfrom(m_socket, m_recvBuffer.data(), m_recvBuffer.size(), MSG_TRUNC,
                            reinterpret_cast<sockaddr*>(&src), &srcLen);
         }
+        // Sampled before any processing so the wire leg excludes framing + verify (#3866).
+        // steady_clock is CLOCK_MONOTONIC here, i.e. the same domain as the pusher's
+        // os_monotonic_now_ns(), and keeps this translation unit free of oxr_utils.
+        const int64_t recvMonotonicNs =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 
         if (n < 0)
         {
@@ -194,11 +199,11 @@ void TeleopUdpReceiver::run(const TeleopFrameSink& sink, const std::atomic<bool>
             continue;
         }
 
-        processDatagram(m_recvBuffer.data(), static_cast<size_t>(n), sink);
+        processDatagram(m_recvBuffer.data(), static_cast<size_t>(n), sink, recvMonotonicNs);
     }
 }
 
-void TeleopUdpReceiver::processDatagram(const uint8_t* data, size_t size, const TeleopFrameSink& sink)
+void TeleopUdpReceiver::processDatagram(const uint8_t* data, size_t size, const TeleopFrameSink& sink, int64_t recvMonotonicNs)
 {
     // 1) Framing: header parse + payload bounds. Validates NO payload content.
     picofullbody::TeleopFrameView view;
@@ -272,7 +277,8 @@ void TeleopUdpReceiver::processDatagram(const uint8_t* data, size_t size, const 
     // Deliver, then commit stream state — only delivered frames advance seq/time.
     if (sink)
     {
-        sink(TeleopFrame{ view.payload, view.payloadLen, seq, sampleTimeNs, view.header.rawDeviceTimeNs, sessionStart });
+        sink(TeleopFrame{ view.payload, view.payloadLen, seq, sampleTimeNs, view.header.rawDeviceTimeNs, sessionStart,
+                          recvMonotonicNs });
     }
     m_stats.delivered.fetch_add(1, std::memory_order_relaxed);
     m_haveSession = true;

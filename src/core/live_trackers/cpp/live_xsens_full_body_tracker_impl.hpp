@@ -28,7 +28,7 @@ using FullBodySchemaTracker = SchemaTracker<FullBodyPosePicoRecord, FullBodyPose
 // pushed by the Xsens add_device pusher. Mechanical mirror of LiveJointStateTrackerImpl — the only
 // real content is one SchemaTracker<FullBodyPosePicoRecord, FullBodyPosePico> and its tensor config.
 // Contrast LiveFullBodyTrackerPicoImpl, which reads OpenXR body joints natively (no collection).
-class LiveXsensFullBodyTrackerImpl : public IFullBodyTrackerPicoImpl
+class LiveXsensFullBodyTrackerImpl : public IFullBodyTrackerPicoImpl, public IXsensFullBodySampleTiming
 {
 public:
     static std::vector<std::string> required_extensions()
@@ -49,6 +49,10 @@ public:
 
     void update(int64_t monotonic_time_ns) override;
     const FullBodyPosePicoTrackedT& get_body_pose() const override;
+
+    // IXsensFullBodySampleTiming — straight pass-through of what the SchemaTracker already read.
+    const DeviceDataTimestamp& last_sample_timestamp() const override;
+    size_t last_sample_count() const override;
 
 private:
     std::unique_ptr<XsensFullBodyMcapChannels> mcap_channels_;

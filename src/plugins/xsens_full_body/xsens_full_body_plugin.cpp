@@ -25,6 +25,17 @@ namespace
 
 constexpr uint64_t kLogEveryFrames = 250; // ~1 s at the MVN 60/240 Hz stream / soak cadence
 
+// Latency tap sampling interval (#3866): emit one ISAACLAT recv line per N delivered frames.
+// 0 (the default) disables the tap, so a normal run's output is byte-identical to T4's.
+uint64_t latencyTapInterval()
+{
+    const char* env = std::getenv("ISAACLAT_N");
+    if (!env)
+        return 0;
+    const long n = std::atol(env);
+    return (n > 0) ? static_cast<uint64_t>(n) : 0;
+}
+
 // FNV-1a 64-bit, for cheap per-frame payload fingerprinting (liveness evidence: distinct hashes
 // over time prove the pose tracks the recording rather than a frozen/cached frame).
 uint64_t fnv1a64(const uint8_t* data, size_t len)
@@ -41,7 +52,7 @@ uint64_t fnv1a64(const uint8_t* data, size_t len)
 } // namespace
 
 XsensFullBodyPlugin::XsensFullBodyPlugin(const std::string& collection_id, uint16_t port)
-    : port_(port), collectionId_(collection_id)
+    : port_(port), collectionId_(collection_id), latencyTapN_(latencyTapInterval())
 {
     establishSession();
 }
@@ -141,6 +152,15 @@ void XsensFullBodyPlugin::onFrame(const teleop::TeleopFrame& frame)
         return; // recovered; drop this stale frame
     }
 
+    // #3866 latency tap. recv_ns comes off the socket (receiver), push_ns is the stamp above, so
+    // the gap is framing + verify + push. push_ns is also the join key to the reader-side line: it
+    // is what the reader reads back as sample_time_local_common_clock.
+    if (latencyTapN_ != 0 && (delivered_ % latencyTapN_) == 0)
+    {
+        std::cout << "ISAACLAT recv seq=" << frame.seq << " recv_ns=" << frame.recvMonotonicNs
+                  << " push_ns=" << localCommonNs << " session=" << (frame.sessionStart ? 1 : 0) << std::endl;
+    }
+
     // First frame of every session (startup or seq reset): header time vs push time.
     if (frame.sessionStart)
     {
@@ -168,6 +188,10 @@ void XsensFullBodyPlugin::run(const std::atomic<bool>& stop)
     }
     std::cout << "[XsensFullBodyPusher] listening on 0.0.0.0:" << port_
               << " -> push_buffer (collection tensor full_body_pose)" << std::endl;
+    if (latencyTapN_ != 0)
+    {
+        std::cout << "ISAACLAT tap n=" << latencyTapN_ << " available=1" << std::endl;
+    }
 
     // Borrowed for this call so onFrame's backoff can observe the stop flag.
     stop_ = &stop;

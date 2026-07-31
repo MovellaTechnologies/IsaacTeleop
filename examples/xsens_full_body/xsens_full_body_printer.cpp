@@ -23,6 +23,7 @@
 #include <deviceio_session/deviceio_session.hpp>
 #include <deviceio_trackers/xsens_full_body_tracker.hpp>
 #include <oxr/oxr_session.hpp>
+#include <oxr_utils/os_time.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -52,6 +53,17 @@ int64_t quantize(float v)
 {
     return static_cast<int64_t>(std::llround(static_cast<double>(v) * 10000.0));
 }
+
+// Latency tap sampling interval (#3866): emit one ISAACLAT read line per N samples drained.
+// 0 (the default) disables the tap entirely, so the soak/proof runs are byte-identical to T4's.
+long latency_tap_interval()
+{
+    const char* env = std::getenv("ISAACLAT_N");
+    if (!env)
+        return 0;
+    const long n = std::atol(env);
+    return (n > 0) ? n : 0;
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -74,6 +86,16 @@ try
 
     std::unique_ptr<core::DeviceIOSession> session = core::DeviceIOSession::run(trackers, oxr_session->get_handles());
 
+    // #3866 latency tap. Null for a non-live impl; the run then reports the tap as unavailable
+    // rather than silently producing no ISAACLAT lines.
+    const long tapN = latency_tap_interval();
+    const core::IXsensFullBodySampleTiming* timing = tracker->sample_timing(*session);
+    if (tapN > 0)
+    {
+        std::cout << "ISAACLAT tap n=" << tapN << " available=" << (timing != nullptr) << std::endl;
+    }
+    uint64_t tapSamples = 0;
+
     std::cout << "Reading... (Ctrl-C to stop)" << std::endl;
 
     uint64_t ticksWithData = 0;
@@ -86,6 +108,21 @@ try
     while (!g_stop.load(std::memory_order_relaxed))
     {
         session->update();
+
+        // Sampled first: read_ns must reflect when this loop observed the sample, so nothing else
+        // may run between update() returning and the clock read.
+        if (tapN > 0 && timing != nullptr && timing->last_sample_count() > 0)
+        {
+            const int64_t readNs = core::os_monotonic_now_ns();
+            if (tapSamples % static_cast<uint64_t>(tapN) == 0)
+            {
+                const core::DeviceDataTimestamp& ts = timing->last_sample_timestamp();
+                std::cout << "ISAACLAT read push_ns=" << ts.sample_time_local_common_clock()
+                          << " avail_ns=" << ts.available_time_local_common_clock() << " read_ns=" << readNs
+                          << " n_samples=" << timing->last_sample_count() << std::endl;
+            }
+            ++tapSamples;
+        }
 
         const auto& tracked = tracker->get_body_pose(*session);
         if (!tracked.data || !tracked.data->joints)

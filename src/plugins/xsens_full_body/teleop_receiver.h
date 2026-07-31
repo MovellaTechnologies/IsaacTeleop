@@ -38,6 +38,10 @@ struct TeleopFrame
     int64_t sampleTimeNs = 0; //!< header value, forwarded untouched (timestamp remap is downstream)
     int64_t rawDeviceTimeNs = 0; //!< header value, forwarded untouched
     bool sessionStart = false; //!< first frame of a session (startup or seq reset)
+    //! CLOCK_MONOTONIC ns sampled immediately after recvfrom() returned this datagram, so the wire
+    //! leg can be measured separately from framing + verify (#3866). 0 when the frame did not come
+    //! off a socket (processDatagram() driven directly by the self-tests).
+    int64_t recvMonotonicNs = 0;
 };
 
 //! Sink invoked once per delivered (framed + verified) frame, synchronously on the receive
@@ -93,7 +97,9 @@ public:
     //! Test seam: the full per-datagram pipeline minus the socket. Framing -> verify gate ->
     //! (seq state machine) -> sink. Public so the malformed / seq case tables can be driven
     //! without opening a socket. \c data must not be null unless \c size is 0.
-    void processDatagram(const uint8_t* data, size_t size, const TeleopFrameSink& sink);
+    //! \c recvMonotonicNs is forwarded verbatim onto the delivered frame; it defaults to 0 so the
+    //! socket-free callers are unaffected.
+    void processDatagram(const uint8_t* data, size_t size, const TeleopFrameSink& sink, int64_t recvMonotonicNs = 0);
 
     //! Test seam: force the next \c times recvfrom() calls to fail with \c errnoValue. Call before
     //! the receive thread starts, so that thread stays the only writer of the socket state.

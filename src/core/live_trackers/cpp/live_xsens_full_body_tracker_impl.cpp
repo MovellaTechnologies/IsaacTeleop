@@ -62,4 +62,14 @@ const FullBodyPosePicoTrackedT& LiveXsensFullBodyTrackerImpl::get_body_pose() co
     return m_tracked;
 }
 
+const DeviceDataTimestamp& LiveXsensFullBodyTrackerImpl::last_sample_timestamp() const
+{
+    return m_schema_reader.last_timestamp();
+}
+
+size_t LiveXsensFullBodyTrackerImpl::last_sample_count() const
+{
+    return m_schema_reader.last_sample_count();
+}
+
 } // namespace core

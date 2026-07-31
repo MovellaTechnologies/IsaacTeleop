@@ -71,6 +71,7 @@ public:
     {
         samples_.clear();
         bool present = read_all_samples(samples_);
+        last_sample_count_ = samples_.size();
 
         if (samples_.empty())
         {
@@ -109,6 +110,30 @@ public:
         {
             mcap_channels_->write(*mcap_channel_tracked_index_, last_timestamp, out_latest);
         }
+
+        last_timestamp_ = last_timestamp;
+    }
+
+    /**
+     * @brief Timestamp of the last sample drained by update(), zero-initialised until the
+     *        first sample arrives and retained across ticks that drain nothing.
+     *
+     * Both clocks are already local monotonic nanoseconds (see SchemaTrackerBase):
+     * sample_time_local_common_clock is the value the producer passed to
+     * SchemaPusher::push_buffer, available_time_local_common_clock is when the sample became
+     * available here. Callers detect "a new sample arrived this tick" via last_sample_count(),
+     * or equivalently by sample_time_local_common_clock changing.
+     */
+    const DeviceDataTimestamp& last_timestamp() const
+    {
+        return last_timestamp_;
+    }
+
+    //! Number of samples drained by the most recent update() call (0 when it drained none).
+    //! Greater than 1 means the consumer is polling slower than the producer pushes.
+    size_t last_sample_count() const
+    {
+        return last_sample_count_;
     }
 
 private:
@@ -116,6 +141,8 @@ private:
     size_t mcap_channel_index_;
     std::optional<size_t> mcap_channel_tracked_index_;
     std::vector<SampleResult> samples_;
+    DeviceDataTimestamp last_timestamp_{};
+    size_t last_sample_count_ = 0;
 };
 
 } // namespace core

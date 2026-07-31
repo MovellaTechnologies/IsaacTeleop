@@ -13,6 +13,30 @@ namespace core
 {
 
 /*!
+ * @brief Sample-timing view of a tensor-collection-backed full-body tracker impl.
+ *
+ * Implemented by the live impl only; a recorded/replay impl need not provide it, so callers must
+ * handle the null return from ``XsensFullBodyTracker::sample_timing()``.
+ *
+ * Exists because the reader-facing ``FullBodyPosePicoTracked`` table carries no timestamp (only the
+ * MCAP ``FullBodyPosePicoRecord`` wrapper does), yet the per-sample ``DeviceDataTimestamp`` is read
+ * from the tensor collection on every update. Surfacing it lets a consumer measure its own end of
+ * the pipeline — ``available - sample`` is transport latency, ``now - available`` is the consumer's
+ * own poll latency — without a side channel or a content-derived join key (#3866).
+ */
+class IXsensFullBodySampleTiming
+{
+public:
+    virtual ~IXsensFullBodySampleTiming() = default;
+
+    //! Timestamp of the last sample drained, retained across ticks that drain nothing.
+    virtual const DeviceDataTimestamp& last_sample_timestamp() const = 0;
+
+    //! Samples drained by the most recent update() (0 = none this tick; >1 = polling too slowly).
+    virtual size_t last_sample_count() const = 0;
+};
+
+/*!
  * @brief Reader-side full body tracker: consumes ``FullBodyPosePico`` bytes from a tensor
  *        collection pushed by a third-party producer (the Xsens add_device pusher).
  *
@@ -73,6 +97,14 @@ public:
      * read.
      */
     const FullBodyPosePicoTrackedT& get_body_pose(const ITrackerSession& session) const;
+
+    /*!
+     * @brief Sample-timing view of this tracker's impl, or null when the impl does not provide one
+     *        (e.g. a recorded/replay impl rather than the live tensor-collection reader).
+     *
+     * Valid for as long as \a session holds the impl.
+     */
+    const IXsensFullBodySampleTiming* sample_timing(const ITrackerSession& session) const;
 
     const std::string& collection_id() const
     {

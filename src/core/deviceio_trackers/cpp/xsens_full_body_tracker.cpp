@@ -20,4 +20,11 @@ const FullBodyPosePicoTrackedT& XsensFullBodyTracker::get_body_pose(const ITrack
     return static_cast<const IFullBodyTrackerPicoImpl&>(session.get_tracker_impl(*this)).get_body_pose();
 }
 
+const IXsensFullBodySampleTiming* XsensFullBodyTracker::sample_timing(const ITrackerSession& session) const
+{
+    // dynamic_cast, not static_cast as above: get_body_pose() is guaranteed by the impl base, but
+    // sample timing is optional (only the live tensor-collection impl provides it).
+    return dynamic_cast<const IXsensFullBodySampleTiming*>(&session.get_tracker_impl(*this));
+}
+
 } // namespace core
