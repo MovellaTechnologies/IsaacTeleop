@@ -157,8 +157,11 @@ void XsensFullBodyPlugin::onFrame(const teleop::TeleopFrame& frame)
     // is what the reader reads back as sample_time_local_common_clock.
     if (latencyTapN_ != 0 && (delivered_ % latencyTapN_) == 0)
     {
+        // sample_ns is the header's MVN session clock (whole ms). Carried here so the cheap
+        // rate/jitter monitor is a pure post-process of this one log, with no MVN-side tap build.
         std::cout << "ISAACLAT recv seq=" << frame.seq << " recv_ns=" << frame.recvMonotonicNs
-                  << " push_ns=" << localCommonNs << " session=" << (frame.sessionStart ? 1 : 0) << std::endl;
+                  << " push_ns=" << localCommonNs << " sample_ns=" << frame.sampleTimeNs
+                  << " session=" << (frame.sessionStart ? 1 : 0) << std::endl;
     }
 
     // First frame of every session (startup or seq reset): header time vs push time.
