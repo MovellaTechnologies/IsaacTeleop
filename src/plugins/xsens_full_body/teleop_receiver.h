@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 Xsens Technologies B.V. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Embedded from mvn_isaac_devtools/tools/teleop_receiver/ (#3863, T4 wire-through). Reformatted to
+// Embedded from mvn_isaac_devtools/tools/teleop_receiver/. Reformatted to
 // the fork's clang-format-14 style on embed (SortIncludes + reflow) + this SPDX header added; the
 // receiver LOGIC is unchanged (token stream identical). The dev/proving home (teleop_udp oracle +
 // sanitizer self-tests, mvn tab style) stays in mvn_isaac_devtools.

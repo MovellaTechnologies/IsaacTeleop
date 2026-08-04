@@ -24,27 +24,26 @@ namespace xsens_full_body
 {
 
 /*!
- * @brief Live pusher (#3863, T4): binds the embedded UDP teleop receiver to OpenXR SchemaPusher so
- *        real MVN Studio "Isaac Teleop" frames flow all the way into a distinct Xsens tensor
- *        collection. Replaces the T1 dummy frame builder with verified receiver bytes.
+ * @brief Live pusher: binds the embedded UDP teleop receiver to OpenXR SchemaPusher so real MVN
+ *        Studio "Isaac Teleop" frames flow into a distinct Xsens tensor collection.
  *
- * Topology (T2/OQ-2): IN-TREE, ONE process. The receiver runs its blocking receive loop on this
- * thread; its sink fires synchronously per verified frame and calls push_buffer directly (no
- * localhost hop, no second framing). SchemaPusher is driven only from that one (receive) thread.
+ * Topology: IN-TREE, ONE process. The receiver runs its blocking receive loop on this thread; its
+ * sink fires synchronously per verified frame and calls push_buffer directly (no localhost hop, no
+ * second framing). SchemaPusher is driven only from that one (receive) thread.
  *
- * Honest Xsens identity (collection_id "xsens_full_body", tensor_identifier "full_body_pose") —
- * this does not pretend to be a Pico device. Paired reader: core::XsensFullBodyTracker on the same
- * collection_id + tensor_identifier (OQ-1). Conversion happens MVN-side (license-gated); the wire
- * carries already-full-body bytes, so deserialize+verify here is parsing, not conversion.
+ * Xsens identity (collection_id "xsens_full_body", tensor_identifier "full_body_pose") — this does
+ * not pretend to be a Pico device. Paired reader: core::XsensFullBodyTracker on the same
+ * collection_id + tensor_identifier. Conversion happens MVN-side (license-gated); the wire carries
+ * already-full-body bytes, so deserialize+verify here is parsing, not conversion.
  *
- * Timestamp mapping (OQ-3): the sink stamps sample_time_local_common_clock_ns with the pusher
- * host's CLOCK_MONOTONIC at push (arrival time) and forwards the header's rawDeviceTimeNs verbatim
- * as the raw device clock. Rationale + NVIDIA confirmation in DECISIONS.md / T4.
+ * Timestamp mapping: the sink stamps sample_time_local_common_clock_ns with the pusher host's
+ * CLOCK_MONOTONIC at push (arrival time) and forwards the header's rawDeviceTimeNs verbatim as the
+ * raw device clock.
  */
 class XsensFullBodyPlugin
 {
 public:
-    static constexpr size_t MAX_FLATBUFFER_SIZE = 4096; // 784 B payload (T1 F2) + headroom
+    static constexpr size_t MAX_FLATBUFFER_SIZE = 4096; // 784 B payload + headroom
     static constexpr uint16_t DEFAULT_PORT = 9764; // MVN Studio Isaac Teleop wire default
 
     XsensFullBodyPlugin(const std::string& collection_id, uint16_t port);

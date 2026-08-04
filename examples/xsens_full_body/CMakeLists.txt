@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.20)
 
 find_package(Threads REQUIRED)
 
-# Reader-side proof for the Xsens full-body add_device route (#3863, T4). Consumes the tensor
+# Reader-side proof for the Xsens full-body add_device route. Consumes the tensor
 # collection via the production reader facade core::XsensFullBodyTracker (deviceio_trackers) driven
 # by a DeviceIOSession (which pulls live_trackers transitively). Mirrors examples/schemaio.
 add_executable(xsens_full_body_printer

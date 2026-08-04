@@ -2,14 +2,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 Xsens Technologies B.V. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Standalone build of the Xsens full-body receiver-fed pusher (#3863), mirroring
+# Standalone build of the Xsens full-body receiver-fed pusher, mirroring
 # mvn_isaac_devtools/tools/teleop_udp/build.sh. Compiles the embedded UDP receiver
 # (teleop_receiver.cpp) + the MVN framing/verify TUs (teleop_wire.cpp, picofullbody_converter.cpp)
 # against the IsaacTeleop build-tree static libs + headers, so it can be built and run without
 # reconfiguring the whole IsaacTeleop super-build.
 #
 # The in-tree CMake target (add_subdirectory(src/plugins/xsens_full_body)) is the eventual home;
-# this script is the fast T1 iteration path. Both produce the same executable.
+# this script is the fast iteration path. Both produce the same executable.
 #
 # Paths derive from this script's location (standard trunk layout: <trunk>/{IsaacTeleop,mvn,3p,
 # linux-x64}). Override IT_ROOT / MVN_ROOT / THREEP / XLIB / IT_BUILD via env.

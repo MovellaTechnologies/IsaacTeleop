@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 Xsens Technologies B.V. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Live receiver-fed pusher for the Isaac add_device Xsens full-body route (ADO #3862 / #3863).
+# Live receiver-fed pusher for the Isaac add_device Xsens full-body route.
 #
-# T1 (#3862) built the dummy-frame spike; #3863 embeds the UDP teleop receiver here (in-tree, one
-# process — T2/OQ-2) so real MVN Studio frames flow receiver -> push_buffer. This plugin therefore
-# compiles three MVN picofullbody_core TUs directly: the receiver's framing (teleop_wire.cpp) and
-# verify gate (picofullbody_converter.cpp), plus the embedded receiver (teleop_receiver.cpp). The
+# The UDP teleop receiver is embedded here (in-tree, one process) so real MVN Studio frames flow
+# receiver -> push_buffer. This plugin therefore compiles three MVN picofullbody_core TUs directly:
+# the receiver's framing (teleop_wire.cpp) and verify gate (picofullbody_converter.cpp), plus the
+# embedded receiver (teleop_receiver.cpp). The
 # MVN paths auto-detect from the standard trunk layout (<trunk>/{IsaacTeleop,mvn,3p,linux-x64}) and
 # can be overridden via cache vars. If the MVN converter is not found the plugin is skipped with a
 # message rather than failing the whole IsaacTeleop build (it is a cross-repo dev/reference target,

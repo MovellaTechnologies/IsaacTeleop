@@ -47,7 +47,7 @@ class XsensFullBodyTracker : public ITracker
 {
 public:
     //! Default maximum FlatBuffer size for FullBodyPosePico messages.
-    //! The payload is a constant 784 B for the fixed 24-joint layout (T1 F2); 4096 leaves >5x
+    //! The payload is a constant 784 B for the fixed 24-joint layout; 4096 leaves >5x
     //! headroom for schema drift while staying trivially small. Pusher and tracker must agree on
     //! this value (it sizes the fixed tensor buffer).
     static constexpr size_t DEFAULT_MAX_FLATBUFFER_SIZE = 4096;

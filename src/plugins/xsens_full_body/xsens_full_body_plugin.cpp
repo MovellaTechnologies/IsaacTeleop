@@ -51,18 +51,16 @@ XsensFullBodyPlugin::XsensFullBodyPlugin(const std::string& collection_id, uint1
 
 void XsensFullBodyPlugin::onFrame(const teleop::TeleopFrame& frame)
 {
-    // OQ-3 timestamp mapping (decided in T4): stamp the local common clock with the pusher host's
-    // CLOCK_MONOTONIC as late as possible (arrival time at push), and forward the header's raw
-    // device time verbatim. The header's sampleTimeNs is a different host's session-relative ms
-    // clock and must NOT be forwarded onto the common clock (see DECISIONS.md). Sampled here, right
-    // before push_buffer, so it does not absorb queueing inside our own code.
+    // Stamp the local common clock with the pusher host's CLOCK_MONOTONIC as late as possible
+    // (arrival time at push) and forward the header's raw device time verbatim. The header's
+    // sampleTimeNs is a different host's session-relative ms clock and must NOT be forwarded onto
+    // the common clock. Sampled right before push_buffer so it does not absorb our own queueing.
     const int64_t localCommonNs = core::os_monotonic_now_ns();
 
     // push_buffer copies the bytes on its side, so the frame's borrowed payload lifetime is fine.
     pusher_.push_buffer(frame.payload, frame.payloadLen, localCommonNs, frame.rawDeviceTimeNs);
 
-    // First frame of every session (startup or seq reset): the raw material for the OQ-6 latency
-    // observation handed to #3866 (header time vs push time), and the session-boundary evidence.
+    // First frame of every session (startup or seq reset): header time vs push time.
     if (frame.sessionStart)
     {
         std::cout << "[XsensFullBodyPusher] session seq=" << frame.seq << " header.sampleTimeNs=" << frame.sampleTimeNs

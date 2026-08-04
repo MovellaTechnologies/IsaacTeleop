@@ -3,7 +3,7 @@
 
 /*!
  * @file xsens_full_body_printer.cpp
- * @brief Reader-side proof for the Xsens full-body add_device route (#3863, T4).
+ * @brief Reader-side proof for the Xsens full-body add_device route.
  *
  * Mirrors examples/schemaio/pedal_printer.cpp, but reads the Xsens full-body tensor collection via
  * the production reader facade core::XsensFullBodyTracker (-> LiveXsensFullBodyTrackerImpl ->
