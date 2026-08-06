@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace core
@@ -58,18 +59,38 @@ public:
         return receiver_.stats();
     }
 
+    //! Sized for an operator-driven CloudXR restart rather than a transient blip: ~23 s total.
+    static constexpr int MAX_SESSION_RECOVERY_ATTEMPTS = 8;
+
 private:
     //! Receiver sink: restamp local-common clock at push, forward raw device time, push verbatim.
     //! Runs on the receive thread; the payload is valid only for this call (push_buffer copies).
     void onFrame(const teleop::TeleopFrame& frame);
 
+    //! Create (or re-create) the session and the SchemaPusher bound to its handles. May throw.
+    void establishSession();
+
+    //! Re-establish after a failed push, bounded retries with backoff. False if the budget ran out
+    //! or \c stop_ was set. Blocks receiving: without a pusher, arriving frames have nowhere to go.
+    bool recoverSession();
+
+    //! Printed on the normal stop path AND when a fatal push unwinds, so a soak keeps its counters.
+    void printStats() const;
+
     uint16_t port_;
+    std::string collectionId_; //!< kept so the pusher can be rebuilt after a session loss
     uint64_t delivered_ = 0; //!< receive-thread-only frame counter for periodic evidence logging
+    uint64_t sessionRecoveries_ = 0; //!< successful re-establishes after a push failure
+    uint64_t pushFailures_ = 0; //!< push_buffer throws seen (each opens a recovery episode)
+
+    //! Borrowed for the duration of run(), so recoverSession()'s backoff stays interruptible.
+    const std::atomic<bool>* stop_ = nullptr;
 
     teleop::TeleopUdpReceiver receiver_;
 
     std::shared_ptr<core::OpenXRSession> session_;
-    core::SchemaPusher pusher_;
+    //! optional because SchemaPusher has deleted copy AND move: a recovery must construct in place.
+    std::optional<core::SchemaPusher> pusher_;
 };
 
 } // namespace xsens_full_body
