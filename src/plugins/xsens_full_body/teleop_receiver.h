@@ -3,8 +3,11 @@
 //
 // Embedded from mvn_isaac_devtools/tools/teleop_receiver/. Reformatted to
 // the fork's clang-format-14 style on embed (SortIncludes + reflow) + this SPDX header added; the
-// receiver LOGIC is unchanged (token stream identical). The dev/proving home (teleop_udp oracle +
+// receiver LOGIC is mirrored, not rewritten. The dev/proving home (teleop_udp oracle +
 // sanitizer self-tests, mvn tab style) stays in mvn_isaac_devtools.
+//
+// One deliberate difference here: the #3866 latency tap lives on the fork's 3866_latency_taps
+// branch, not in the shipping receiver. Everything else is kept in step with devtools.
 
 #ifndef TELEOP_RECEIVER_H
 #define TELEOP_RECEIVER_H
@@ -57,6 +60,8 @@ struct TeleopReceiverStats
     std::atomic<uint64_t> droppedTruncated{ 0 }; //!< datagram larger than the recv buffer (MSG_TRUNC)
     std::atomic<uint64_t> warnedNonWholeMs{ 0 }; //!< sampleTime not a whole millisecond
     std::atomic<uint64_t> warnedTimeBackward{ 0 }; //!< sampleTime went backward
+    std::atomic<uint64_t> socketRecoveries{ 0 }; //!< hard recvfrom errors survived by re-opening
+    std::atomic<uint64_t> socketRecoveryFailures{ 0 }; //!< recovery episodes that exhausted their retries
 };
 
 //! Single-threaded, blocking UDP receive loop. One datagram = one frame. Not copyable (owns a
@@ -75,7 +80,8 @@ public:
     bool open(uint16_t port);
 
     //! Blocking receive loop on THIS thread: runs the per-datagram pipeline and invokes \c sink
-    //! for each delivered frame. Returns when \c stop becomes true or on a fatal socket error.
+    //! for each delivered frame. Returns when \c stop becomes true, or when a hard socket error
+    //! outlives recoverSocket()'s retry budget.
     //! The TeleopFrame passed to \c sink (and its payload) is valid only until the sink returns.
     void run(const TeleopFrameSink& sink, const std::atomic<bool>& stop);
 
@@ -88,6 +94,12 @@ public:
     //! (seq state machine) -> sink. Public so the malformed / seq case tables can be driven
     //! without opening a socket. \c data must not be null unless \c size is 0.
     void processDatagram(const uint8_t* data, size_t size, const TeleopFrameSink& sink);
+
+    //! Test seam: force the next \c times recvfrom() calls to fail with \c errnoValue. Call before
+    //! the receive thread starts, so that thread stays the only writer of the socket state.
+    void injectRecvErrors(int errnoValue, int times);
+
+    static constexpr int MaxRecoveryAttempts = 5;
 
 private:
     //! Per-category log throttle. A malformed/lossy flood must not DoS the log, so each category
@@ -102,8 +114,14 @@ private:
         LC_Truncated,
         LC_NonWholeMs,
         LC_TimeBackward,
+        LC_Recovered,
+        LC_RecoveryFailed,
         LC_Count
     };
+
+    //! Re-bind after a hard recvfrom error, bounded retries with backoff. Stream state is left
+    //! untouched: the outage reappears as a gap or a seq reset, both already handled.
+    bool recoverSocket(const std::atomic<bool>& stop);
 
     void logMessage(const char* message);
     //! Emit \c message for \c category only on its 1st and every 100th occurrence. Single-writer:
@@ -112,6 +130,9 @@ private:
 
     TeleopLogFn m_logFn;
     int m_socket = -1;
+    uint16_t m_port = 0; //!< last port passed to open(), so recoverSocket() can re-bind it
+    int m_injectRecvErrorsLeft = 0; //!< see injectRecvErrors()
+    int m_injectRecvErrno = 0;
     bool m_haveSession = false;
     uint64_t m_lastSeq = 0;
     int64_t m_lastSampleTimeNs = 0;

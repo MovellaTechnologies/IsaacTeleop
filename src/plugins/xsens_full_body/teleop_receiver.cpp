@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Embedded from mvn_isaac_devtools/tools/teleop_receiver/. Reformatted to
-// the fork's clang-format-14 style on embed (SortIncludes + reflow); the receiver LOGIC is unchanged
-// (non-include code byte-identical to the devtools original modulo whitespace).
+// the fork's clang-format-14 style on embed (SortIncludes + reflow); the receiver LOGIC is mirrored,
+// not rewritten. See teleop_receiver.h for the one deliberate difference on this branch.
 
 #include "teleop_receiver.h"
 
@@ -16,8 +16,10 @@
 #include <sys/time.h>
 
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <thread>
 #include <unistd.h>
 #include <utility>
 
@@ -90,7 +92,53 @@ bool TeleopUdpReceiver::open(uint16_t port)
     }
 
     m_socket = sock;
+    m_port = port;
     return true;
+}
+
+void TeleopUdpReceiver::injectRecvErrors(int errnoValue, int times)
+{
+    m_injectRecvErrno = errnoValue;
+    m_injectRecvErrorsLeft = times;
+}
+
+bool TeleopUdpReceiver::recoverSocket(const std::atomic<bool>& stop)
+{
+    // Without a port, recovery would bind an ephemeral one the sender cannot reach.
+    if (m_port == 0)
+    {
+        m_stats.socketRecoveryFailures.fetch_add(1, std::memory_order_relaxed);
+        logRateLimited(LC_RecoveryFailed, "teleop receiver: socket error before a successful open(), stopping");
+        return false;
+    }
+
+    static constexpr int backoffMs[MaxRecoveryAttempts] = { 100, 200, 400, 800, 800 }; // ~2.3 s total
+    static constexpr int sliceMs = 50;
+
+    for (int attempt = 0; attempt < MaxRecoveryAttempts; ++attempt)
+    {
+        // Sliced so a stop request does not wait out the whole backoff.
+        for (int remaining = backoffMs[attempt]; remaining > 0; remaining -= sliceMs)
+        {
+            if (stop.load(std::memory_order_relaxed))
+                return false;
+            std::this_thread::sleep_for(std::chrono::milliseconds(remaining < sliceMs ? remaining : sliceMs));
+        }
+
+        if (stop.load(std::memory_order_relaxed))
+            return false;
+
+        if (open(m_port)) // idempotent: closes the dead socket, then re-binds
+        {
+            m_stats.socketRecoveries.fetch_add(1, std::memory_order_relaxed);
+            logRateLimited(LC_Recovered, "teleop receiver: socket recovered, receive loop continuing");
+            return true;
+        }
+    }
+
+    m_stats.socketRecoveryFailures.fetch_add(1, std::memory_order_relaxed);
+    logRateLimited(LC_RecoveryFailed, "teleop receiver: socket recovery exhausted its retries, stopping");
+    return false;
 }
 
 void TeleopUdpReceiver::close()
@@ -113,14 +161,27 @@ void TeleopUdpReceiver::run(const TeleopFrameSink& sink, const std::atomic<bool>
     {
         sockaddr_in src;
         socklen_t srcLen = sizeof(src);
-        const ssize_t n = ::recvfrom(
-            m_socket, m_recvBuffer.data(), m_recvBuffer.size(), MSG_TRUNC, reinterpret_cast<sockaddr*>(&src), &srcLen);
+        ssize_t n;
+        if (m_injectRecvErrorsLeft > 0) // test seam, see injectRecvErrors()
+        {
+            --m_injectRecvErrorsLeft;
+            errno = m_injectRecvErrno;
+            n = -1;
+        }
+        else
+        {
+            n = ::recvfrom(m_socket, m_recvBuffer.data(), m_recvBuffer.size(), MSG_TRUNC,
+                           reinterpret_cast<sockaddr*>(&src), &srcLen);
+        }
+
         if (n < 0)
         {
             if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
                 continue; // recv timeout / interrupt: re-check stop and keep going
-            logMessage("teleop receiver: recvfrom() failed, stopping");
-            break; // real socket error: the only non-stop exit
+
+            if (!recoverSocket(stop))
+                break; // stop requested, or the retry budget ran out: the only non-stop exit
+            continue;
         }
 
         if (static_cast<size_t>(n) > m_recvBuffer.size())
